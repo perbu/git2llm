@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+const (
+	exclusionFile = ".llmignore"
+)
+
 // FS defines an interface for file system operations to improve testability.
 type FS interface {
 	Open(name string) (File, error)
@@ -48,7 +52,7 @@ var FileSystem FS = OSFS{}
 
 // parseExclusionFile reads exclusion patterns from a file.
 func parseExclusionFile(fs FS, filePath string) (map[string]bool, error) {
-	patterns := make(map[string]bool)
+	patterns := defaultPatterns()
 	if filePath != "" {
 		file, err := fs.Open(filePath)
 		if err != nil {
@@ -71,6 +75,18 @@ func parseExclusionFile(fs FS, filePath string) (map[string]bool, error) {
 		}
 	}
 	return patterns, nil
+}
+
+// defaultPatterns returns a map of default exclusion patterns.
+// the default is to ignore the .git directory.
+func defaultPatterns() map[string]bool {
+	return map[string]bool{
+		".git":    true,
+		".svn":    true,
+		".idea":   true,
+		".vscode": true,
+	}
+
 }
 
 // isExcluded checks if a path is excluded based on exclusion patterns.
@@ -308,27 +324,13 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string)
 }
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: go run script.go <start_path> <output_file> [exclusion_file] [file_extensions...]")
-		fmt.Println("Both exclusion_file and file_extensions are optional.")
+
+	if len(os.Args) < 2 {
+		fmt.Printf("Usage: %s <start_path> [file_extensions...]\n", os.Args[0])
 		os.Exit(1)
 	}
 
 	startPath := os.Args[1]
-	outputFile := os.Args[2]
-	var exclusionFile string
-	var fileTypes []string
-
-	if len(os.Args) > 3 {
-		if !strings.HasPrefix(os.Args[3], ".") {
-			exclusionFile = os.Args[3]
-			if len(os.Args) > 4 {
-				fileTypes = os.Args[4:]
-			}
-		} else {
-			fileTypes = os.Args[3:]
-		}
-	}
 
 	exclusionPatterns, err := parseExclusionFile(FileSystem, exclusionFile)
 	if err != nil {
@@ -336,10 +338,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	if exclusionFile != "" {
-		fmt.Fprintf(os.Stderr, "Using exclusion patterns from %s: %v\n", exclusionFile, exclusionPatterns)
-	} else {
-		fmt.Fprintf(os.Stderr, "No exclusion file specified. Scanning all files.\n")
+	var fileTypes []string
+	if len(os.Args) > 2 {
+		fileTypes = os.Args[2:]
 	}
 
 	if fileTypes != nil {
@@ -348,18 +349,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "No file types specified. Scanning all files.\n")
 	}
 
-	outFile, err := os.Create(outputFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating output file: %v\n", err)
-		os.Exit(1)
-	}
-	defer outFile.Close()
-
-	err = scanFolder(FileSystem, startPath, fileTypes, outFile, exclusionPatterns)
+	err = scanFolder(FileSystem, startPath, fileTypes, os.Stdout, exclusionPatterns)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Scan failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stderr, "Scan complete. Results written to %s\n", outputFile)
+	fmt.Fprintf(os.Stderr, "Scan complete.")
 }

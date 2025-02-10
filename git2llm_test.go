@@ -22,13 +22,13 @@ func TestParseExclusionFile(t *testing.T) {
 		{
 			name:     "no exclusion file",
 			filePath: "nonexistent_file.txt",
-			expect:   map[string]bool{},
+			expect:   defaultPatterns(),
 		},
 		{
 			name:        "empty exclusion file",
 			filePath:    "exclusions.txt",
 			fileContent: "",
-			expect:      map[string]bool{},
+			expect:      defaultPatterns(),
 		},
 		{
 			name:        "valid exclusion file",
