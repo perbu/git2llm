@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,9 @@ import (
 const (
 	exclusionFile = ".llmignore"
 )
+
+//go:embed .version
+var embeddedVersion string
 
 // FS defines an interface for file system operations to improve testability.
 type FS interface {
@@ -324,6 +328,7 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string)
 }
 
 func main() {
+	fmt.Fprintf(os.Stderr, "Version: %s\n", embeddedVersion)
 
 	if len(os.Args) < 2 {
 		fmt.Printf("Usage: %s <start_path> [file_extensions...]\n", os.Args[0])
