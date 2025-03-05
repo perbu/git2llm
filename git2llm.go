@@ -327,15 +327,41 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string)
 	return nil
 }
 
+func printUsage() {
+	fmt.Printf("Usage: %s [options] <start_path> [file_extensions...]\n\n", os.Args[0])
+	fmt.Println("Options:")
+	fmt.Println("  -t, --exclude-tests    Exclude test files (e.g., *_test.go, test_*.go)")
+	fmt.Println("  -h, --help             Display this help message")
+	fmt.Println("\nArguments:")
+	fmt.Println("  start_path             Path to the directory to scan")
+	fmt.Println("  file_extensions        Optional file extensions to include (e.g., .go .js)")
+}
+
 func main() {
 	fmt.Fprintf(os.Stderr, "Version: %s\n", embeddedVersion)
 
-	if len(os.Args) < 2 {
-		fmt.Printf("Usage: %s <start_path> [file_extensions...]\n", os.Args[0])
+	var excludeTests bool
+	args := os.Args[1:]
+
+	// Parse flags
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--exclude-tests" || args[i] == "-t" {
+			excludeTests = true
+			// Remove the flag from args
+			args = append(args[:i], args[i+1:]...)
+			i-- // Adjust index after removal
+		} else if args[i] == "--help" || args[i] == "-h" {
+			printUsage()
+			os.Exit(0)
+		}
+	}
+
+	if len(args) < 1 {
+		printUsage()
 		os.Exit(1)
 	}
 
-	startPath := os.Args[1]
+	startPath := args[0]
 
 	exclusionPatterns, err := parseExclusionFile(FileSystem, exclusionFile)
 	if err != nil {
@@ -343,9 +369,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Add test file patterns if excludeTests is set
+	if excludeTests {
+		exclusionPatterns["*_test.go"] = true
+		exclusionPatterns["test_*.go"] = true
+		fmt.Fprintf(os.Stderr, "Excluding test files\n")
+	}
+
 	var fileTypes []string
-	if len(os.Args) > 2 {
-		fileTypes = os.Args[2:]
+	if len(args) > 1 {
+		fileTypes = args[1:]
 	}
 
 	if fileTypes != nil {
