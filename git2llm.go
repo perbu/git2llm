@@ -15,6 +15,9 @@ const (
 	exclusionFile = ".llmignore"
 )
 
+//go:embed test-patterns.txt
+var testPatterns string
+
 //go:embed .version
 var embeddedVersion string
 
@@ -124,7 +127,7 @@ func isExcluded(path string, exclusionPatterns map[string]bool) bool {
 }
 
 // printDirectoryStructure generates a string representation of the directory structure.
-func printDirectoryStructure(fs FS, startPath string, exclusionPatterns map[string]bool) (string, error) {
+func printDirectoryStructure(fs FS, startPath string, exclusionPatterns map[string]bool, fileTypes []string) (string, error) {
 	var tree strings.Builder
 
 	var generateTree func(dirPath string, prefix string) error
@@ -153,6 +156,20 @@ func printDirectoryStructure(fs FS, startPath string, exclusionPatterns map[stri
 
 			if isExcluded(relPath, exclusionPatterns) {
 				continue
+			}
+
+			// Skip files that don't match fileTypes filter
+			if !entry.IsDir() && fileTypes != nil && len(fileTypes) > 0 {
+				var matched bool
+				for _, ext := range fileTypes {
+					if strings.HasSuffix(entryName, ext) {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
 			}
 
 			var connector string
@@ -225,7 +242,7 @@ func scanFolder(fs FS, startPath string, fileTypes []string, outputWriter io.Wri
 		return fmt.Errorf("error writing to output file: %w", err)
 	}
 
-	dirTree, err := printDirectoryStructure(fs, startPath, exclusionPatterns)
+	dirTree, err := printDirectoryStructure(fs, startPath, exclusionPatterns, fileTypes)
 	if err != nil {
 		return err
 	}
@@ -255,7 +272,7 @@ func scanFolder(fs FS, startPath string, fileTypes []string, outputWriter io.Wri
 				return nil
 			}
 
-			if fileTypes == nil { // if fileTypes is nil, process all files
+			if fileTypes == nil || len(fileTypes) == 0 { // if fileTypes is nil or empty, process all files
 				if err := processFile(fs, outputWriter, path, relPath); err != nil {
 					fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", relPath, err) // Log to stderr
 				}
@@ -330,7 +347,7 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string)
 func printUsage() {
 	fmt.Printf("Usage: %s [options] <start_path> [file_extensions...]\n\n", os.Args[0])
 	fmt.Println("Options:")
-	fmt.Println("  -t, --exclude-tests    Exclude test files (e.g., *_test.go, test_*.go)")
+	fmt.Println("  -t, --exclude-tests    Exclude test files from known languages")
 	fmt.Println("  -h, --help             Display this help message")
 	fmt.Println("\nArguments:")
 	fmt.Println("  start_path             Path to the directory to scan")
@@ -371,9 +388,22 @@ func main() {
 
 	// Add test file patterns if excludeTests is set
 	if excludeTests {
-		exclusionPatterns["*_test.go"] = true
-		exclusionPatterns["test_*.go"] = true
-		fmt.Fprintf(os.Stderr, "Excluding test files\n")
+		testPatterns := strings.Split(testPatterns, "\n")
+		patterns := 0
+		for _, pattern := range testPatterns {
+			i := strings.Index(pattern, "#")
+			if i != -1 {
+				pattern = pattern[:i]
+			}
+			pattern = strings.TrimSpace(pattern)
+			if pattern != "" {
+				exclusionPatterns[pattern] = true
+				patterns++
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Excluded %d test patterns\n", patterns)
+	} else {
+		fmt.Fprintf(os.Stderr, "Including all files.\n")
 	}
 
 	var fileTypes []string

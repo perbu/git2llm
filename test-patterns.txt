@@ -1,0 +1,78 @@
+# Test file patterns for mainstream languages
+# Java
+*Test.java
+Test*.java
+*IT.java
+*Spec.java
+src/test/**/*.java
+
+# Python
+test_*.py
+*_test.py
+tests/**/*.py
+*Test.py
+conftest.py
+
+# JavaScript/TypeScript
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts
+__tests__/**/*.js
+__tests__/**/*.ts
+**/*.spec.js
+**/*.spec.ts
+**/*.e2e.js
+**/*.e2e.ts
+
+# Ruby
+*_test.rb
+*_spec.rb
+test/**/*.rb
+spec/**/*.rb
+
+# C#/.NET
+*Tests.cs
+*Test.cs
+*Spec.cs
+*Fixture.cs
+
+# PHP
+*Test.php
+test/**/*.php
+tests/**/*.php
+
+# C/C++
+*_test.c
+*_test.cpp
+test_*.c
+test_*.cpp
+*Test.c
+*Test.cpp
+*_spec.c
+*_spec.cpp
+
+# Rust
+*_test.rs
+tests/**/*.rs
+
+# Swift
+*Tests.swift
+*Test.swift
+*Spec.swift
+
+# Kotlin
+*Test.kt
+*Spec.kt
+src/test/**/*.kt
+
+# Go
+*_test.go
+
+# Scala
+*Test.scala
+*Spec.scala
+*Suite.scala
+
+# Varnish
+*.vtc

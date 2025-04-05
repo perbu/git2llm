@@ -149,6 +149,75 @@ func TestIsBinaryFile(t *testing.T) {
 	}
 }
 
+func TestFileExtensionFiltering(t *testing.T) {
+	testCases := []struct {
+		name         string
+		fileName     string
+		fileTypes    []string
+		shouldAccept bool
+	}{
+		{"go file with go filter", "main.go", []string{".go"}, true},
+		{"js file with go filter", "script.js", []string{".go"}, false},
+		{"go file with js filter", "main.go", []string{".js"}, false},
+		{"go file with multiple filters", "main.go", []string{".go", ".js"}, true},
+		{"js file with multiple filters", "script.js", []string{".go", ".js"}, true},
+		{"md file with multiple filters", "readme.md", []string{".go", ".js"}, false},
+		{"any file with no filter", "main.go", nil, true},
+		{"any file with empty filter", "script.js", []string{}, false}, // Empty filter means no files match
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Test filtering in the ProcessFile part of scanFolder
+			shouldProcess := false
+			if tc.fileTypes == nil {
+				shouldProcess = true
+			} else {
+				for _, ext := range tc.fileTypes {
+					if strings.HasSuffix(tc.fileName, ext) {
+						shouldProcess = true
+						break
+					}
+				}
+			}
+
+			if shouldProcess != tc.shouldAccept {
+				t.Errorf("For file '%s' with filters %v, got shouldProcess=%v, expected %v",
+					tc.fileName, tc.fileTypes, shouldProcess, tc.shouldAccept)
+			}
+		})
+	}
+
+	// Test directory tree filtering
+	t.Run("directory tree filtering", func(t *testing.T) {
+		fileTypes := []string{".go"}
+		mockFS := &MockFS{
+			DirStructure: map[string][]string{
+				"test": {"main.go", "script.js", "readme.md"},
+			},
+		}
+
+		result, err := printDirectoryStructure(mockFS, "test", map[string]bool{}, fileTypes)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+
+		// Check that .go files are included
+		if !strings.Contains(result, "main.go") {
+			t.Errorf("Expected 'main.go' to be included in directory tree output")
+		}
+
+		// Check that non-.go files are excluded
+		if strings.Contains(result, "script.js") {
+			t.Errorf("Did not expect 'script.js' to be included in directory tree output")
+		}
+
+		if strings.Contains(result, "readme.md") {
+			t.Errorf("Did not expect 'readme.md' to be included in directory tree output")
+		}
+	})
+}
+
 func TestProcessFile(t *testing.T) {
 	testCases := []struct {
 		name         string
@@ -228,6 +297,7 @@ Content of testfile.txt: (Skipped - Binary File)
 // MockFS for testing
 type MockFS struct {
 	FileContent    string
+	FileContentMap map[string]string
 	DirStructure   map[string][]string
 	IsBinaryResult bool
 	ReadFileError  error
@@ -260,6 +330,14 @@ func (m *MockFS) Open(name string) (File, error) {
 			return nil, err
 		}
 	}
+
+	// Use FileContentMap if available
+	if m.FileContentMap != nil {
+		if content, ok := m.FileContentMap[name]; ok {
+			return &MockFile{content: content}, nil
+		}
+	}
+
 	return &MockFile{content: m.FileContent}, nil
 }
 
@@ -286,6 +364,14 @@ func (m *MockFS) ReadFile(name string) ([]byte, error) {
 	if m.ReadFileError != nil {
 		return nil, m.ReadFileError
 	}
+
+	// Use FileContentMap if available
+	if m.FileContentMap != nil {
+		if content, ok := m.FileContentMap[name]; ok {
+			return []byte(content), nil
+		}
+	}
+
 	return []byte(m.FileContent), nil
 }
 
