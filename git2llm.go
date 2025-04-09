@@ -217,8 +217,8 @@ func isBinaryFile(fs FS, filePath string) bool {
 	}
 	defer file.Close()
 
-	// Read up to 512 bytes to check for null byte
-	buffer := make([]byte, 512)
+	// Read up to X bytes to check for null byte
+	buffer := make([]byte, 4096)
 	n, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
 		return false // Assume not binary if read error, or handle error differently
@@ -233,7 +233,7 @@ func isBinaryFile(fs FS, filePath string) bool {
 }
 
 // scanFolder scans a folder, writes directory structure and file contents to output file.
-func scanFolder(fs FS, startPath string, fileTypes []string, outputWriter io.Writer, exclusionPatterns map[string]bool) error {
+func scanFolder(fs FS, startPath string, fileTypes []string, outputWriter io.Writer, exclusionPatterns map[string]bool, verbose bool) error {
 
 	if _, err := fmt.Fprintln(outputWriter, "Directory Structure:"); err != nil {
 		return fmt.Errorf("error writing to output file: %w", err)
@@ -272,14 +272,14 @@ func scanFolder(fs FS, startPath string, fileTypes []string, outputWriter io.Wri
 				return nil
 			}
 
-			if fileTypes == nil || len(fileTypes) == 0 { // if fileTypes is nil or empty, process all files
-				if err := processFile(fs, outputWriter, path, relPath); err != nil {
+			if len(fileTypes) == 0 { // if fileTypes is nil or empty, process all files
+				if err := processFile(fs, outputWriter, path, relPath, verbose); err != nil {
 					fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", relPath, err) // Log to stderr
 				}
 			} else { // Otherwise check file extensions
 				for _, ext := range fileTypes {
 					if strings.HasSuffix(info.Name(), ext) {
-						if err := processFile(fs, outputWriter, path, relPath); err != nil {
+						if err := processFile(fs, outputWriter, path, relPath, verbose); err != nil {
 							fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", relPath, err) // Log to stderr
 						}
 						return nil // processed the file, no need to check other extensions
@@ -296,7 +296,7 @@ func scanFolder(fs FS, startPath string, fileTypes []string, outputWriter io.Wri
 	return nil
 }
 
-func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string) error {
+func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string, verbose bool) error {
 	if isBinaryFile(fs, filePath) {
 		fmt.Fprintf(os.Stderr, "Skipping binary file: %s\n", relPath) // Log to stderr
 		if _, err := fmt.Fprintf(outputWriter, "File: %s (Binary - skipped content)\n", relPath); err != nil {
@@ -312,7 +312,9 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string)
 		return nil // Skip binary files content but not an error for overall process
 	}
 
-	fmt.Fprintf(os.Stderr, "Processing: %s\n", relPath) // Log to stderr
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Processing: %s\n", relPath) // Log to stderr
+	}
 
 	if _, err := fmt.Fprintf(outputWriter, "File: %s\n", relPath); err != nil {
 		return fmt.Errorf("error writing to output file: %w", err)
@@ -355,21 +357,24 @@ func printUsage() {
 }
 
 func main() {
-	fmt.Fprintf(os.Stderr, "Version: %s\n", embeddedVersion)
 
 	var excludeTests bool
+	var verbose bool
 	args := os.Args[1:]
 
 	// Parse flags
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--exclude-tests" || args[i] == "-t" {
 			excludeTests = true
-			// Remove the flag from args
 			args = append(args[:i], args[i+1:]...)
-			i-- // Adjust index after removal
+			i--
 		} else if args[i] == "--help" || args[i] == "-h" {
 			printUsage()
 			os.Exit(0)
+		} else if args[i] == "--verbose" || args[i] == "-v" {
+			verbose = true
+			args = append(args[:i], args[i+1:]...)
+			i--
 		}
 	}
 
@@ -380,13 +385,18 @@ func main() {
 
 	startPath := args[0]
 
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Version: %s\n", embeddedVersion)
+	}
+
 	exclusionPatterns, err := parseExclusionFile(FileSystem, exclusionFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing exclusion file: %v\n", err)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Error parsing exclusion file: %v\n", err)
+		}
 		os.Exit(1)
 	}
 
-	// Add test file patterns if excludeTests is set
 	if excludeTests {
 		testPatterns := strings.Split(testPatterns, "\n")
 		patterns := 0
@@ -401,9 +411,13 @@ func main() {
 				patterns++
 			}
 		}
-		fmt.Fprintf(os.Stderr, "Excluded %d test patterns\n", patterns)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Excluded %d test patterns\n", patterns)
+		}
 	} else {
-		fmt.Fprintf(os.Stderr, "Including all files.\n")
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Including all files.\n")
+		}
 	}
 
 	var fileTypes []string
@@ -411,17 +425,23 @@ func main() {
 		fileTypes = args[1:]
 	}
 
-	if fileTypes != nil {
-		fmt.Fprintf(os.Stderr, "Scanning for file types: %v\n", fileTypes)
-	} else {
-		fmt.Fprintf(os.Stderr, "No file types specified. Scanning all files.\n")
+	if verbose {
+		if fileTypes != nil {
+			fmt.Fprintf(os.Stderr, "Scanning for file types: %v\n", fileTypes)
+		} else {
+			fmt.Fprintf(os.Stderr, "No file types specified. Scanning all files.\n")
+		}
 	}
 
-	err = scanFolder(FileSystem, startPath, fileTypes, os.Stdout, exclusionPatterns)
+	err = scanFolder(FileSystem, startPath, fileTypes, os.Stdout, exclusionPatterns, verbose)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Scan failed: %v\n", err)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Scan failed: %v\n", err)
+		}
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stderr, "Scan complete.")
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Scan complete.")
+	}
 }
