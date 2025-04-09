@@ -313,7 +313,7 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string,
 	}
 
 	if verbose {
-		fmt.Fprintf(os.Stderr, "Processing: %s\n", relPath) // Log to stderr
+		fmt.Fprintf(os.Stderr, "Processing: %s ", relPath) // Log to stderr
 	}
 
 	if _, err := fmt.Fprintf(outputWriter, "File: %s\n", relPath); err != nil {
@@ -329,6 +329,13 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string,
 			return fmt.Errorf("error writing error message to output file: %w (original error: %v)", errWrite, err)
 		}
 		return fmt.Errorf("error reading file %s: %w", relPath, err) // Still return an error for logging in scanFolder
+	}
+	if verbose {
+		// count the number of lines in the file
+		lineCount := strings.Count(string(content), "\n")
+		fmt.Fprintf(os.Stderr, "(%d lines)\n", lineCount) // Log to stderr
+	} else {
+		fmt.Fprintln(os.Stderr) // Just a new line
 	}
 
 	if _, err := fmt.Fprintf(outputWriter, "Content of %s:\n", relPath); err != nil {
