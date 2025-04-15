@@ -334,10 +334,7 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string,
 		// count the number of lines in the file
 		lineCount := strings.Count(string(content), "\n")
 		fmt.Fprintf(os.Stderr, "(%d lines)\n", lineCount) // Log to stderr
-	} else {
-		fmt.Fprintln(os.Stderr) // Just a new line
 	}
-
 	if _, err := fmt.Fprintf(outputWriter, "Content of %s:\n", relPath); err != nil {
 		return fmt.Errorf("error writing to output file: %w", err)
 	}
