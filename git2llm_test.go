@@ -223,6 +223,7 @@ func TestProcessFile(t *testing.T) {
 		name         string
 		fileContent  string
 		isBinary     bool
+		isSymlink    bool
 		expectOutput string
 		expectError  error
 	}{
@@ -230,6 +231,7 @@ func TestProcessFile(t *testing.T) {
 			name:        "text file processing",
 			fileContent: "This is the content of a text file.",
 			isBinary:    false,
+			isSymlink:   false,
 			expectOutput: `File: testfile.txt
 --------------------------------------------------
 Content of testfile.txt:
@@ -241,9 +243,22 @@ This is the content of a text file.
 			name:        "binary file - skip content",
 			fileContent: string([]byte{0, 1, 2, 3, 4, 5}),
 			isBinary:    true,
+			isSymlink:   false,
 			expectOutput: `File: testfile.txt (Binary - skipped content)
 --------------------------------------------------
 Content of testfile.txt: (Skipped - Binary File)
+
+
+`,
+		},
+		{
+			name:        "symlink file - skip content",
+			fileContent: "This is a symlink that should be skipped.",
+			isBinary:    false,
+			isSymlink:   true,
+			expectOutput: `File: testfile.txt (Symlink - skipped content)
+--------------------------------------------------
+Content of testfile.txt: (Skipped - Symlink)
 
 
 `,
@@ -252,13 +267,23 @@ Content of testfile.txt: (Skipped - Binary File)
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Save the original isSymlinkFn
+			originalIsSymlinkFn := isSymlinkFn
+			// Restore it after the test
+			defer func() { isSymlinkFn = originalIsSymlinkFn }()
+
+			// Override isSymlinkFn for this test
+			isSymlinkFn = func(filePath string) bool {
+				return tc.isSymlink
+			}
+
 			mockFS := &MockFS{
 				FileContent:    tc.fileContent,
 				IsBinaryResult: tc.isBinary,
 			}
 
 			outputWriter := &bytes.Buffer{}
-			err := processFile(mockFS, outputWriter, "testfile.txt", "testfile.txt")
+			err := processFile(mockFS, outputWriter, "testfile.txt", "testfile.txt", false)
 
 			if tc.expectError != nil {
 				if err == nil || !strings.Contains(err.Error(), tc.expectError.Error()) {
@@ -281,7 +306,11 @@ Content of testfile.txt: (Skipped - Binary File)
 				t.Errorf("First line mismatch. Expected: %q, Got: %q", expectedLines[0], outputLines[0])
 			}
 
-			if tc.isBinary {
+			if tc.isSymlink {
+				if !strings.Contains(output, "Symlink") {
+					t.Errorf("Symlink file output should contain 'Symlink'")
+				}
+			} else if tc.isBinary {
 				if !strings.Contains(output, "Binary") {
 					t.Errorf("Binary file output should contain 'Binary'")
 				}

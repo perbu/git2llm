@@ -209,6 +209,21 @@ func printDirectoryStructure(fs FS, startPath string, exclusionPatterns map[stri
 	return tree.String(), nil
 }
 
+// isSymlinkFn is a variable holding the function to check if a file is a symbolic link.
+// This allows for easy swapping of the implementation in tests.
+var isSymlinkFn = func(filePath string) bool {
+	info, err := os.Lstat(filePath)
+	if err != nil {
+		return false // Assume not symlink if error, or handle error differently
+	}
+	return info.Mode()&os.ModeSymlink != 0
+}
+
+// isSymlink checks if a file is a symbolic link.
+func isSymlink(filePath string) bool {
+	return isSymlinkFn(filePath)
+}
+
 // isBinaryFile checks if a file is likely a binary file by looking for null bytes in the first 512 bytes.
 func isBinaryFile(fs FS, filePath string) bool {
 	file, err := fs.Open(filePath)
@@ -297,6 +312,21 @@ func scanFolder(fs FS, startPath string, fileTypes []string, outputWriter io.Wri
 }
 
 func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string, verbose bool) error {
+	if isSymlink(filePath) {
+		fmt.Fprintf(os.Stderr, "Skipping symlink: %s\n", relPath) // Log to stderr
+		if _, err := fmt.Fprintf(outputWriter, "File: %s (Symlink - skipped content)\n", relPath); err != nil {
+			return fmt.Errorf("error writing to output file: %w", err)
+		}
+		if _, err := fmt.Fprintln(outputWriter, strings.Repeat("-", 50)); err != nil {
+			return fmt.Errorf("error writing to output file: %w", err)
+		}
+		if _, err := fmt.Fprintf(outputWriter, "Content of %s: (Skipped - Symlink)\n\n\n", relPath); err != nil {
+			return fmt.Errorf("error writing to output file: %w", err)
+		}
+
+		return nil // Skip symlinks content but not an error for overall process
+	}
+
 	if isBinaryFile(fs, filePath) {
 		fmt.Fprintf(os.Stderr, "Skipping binary file: %s\n", relPath) // Log to stderr
 		if _, err := fmt.Fprintf(outputWriter, "File: %s (Binary - skipped content)\n", relPath); err != nil {
