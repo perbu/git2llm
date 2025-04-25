@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	_ "embed"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -56,6 +57,18 @@ func (OSFS) Stat(name string) (os.FileInfo, error) {
 // FileSystem is a global variable for the FS interface.
 // This allows for easy swapping of the implementation in tests.
 var FileSystem FS = OSFS{}
+
+// stringSliceFlag is a custom flag type that allows for multiple string values
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string {
+	return strings.Join(*s, ", ")
+}
+
+func (s *stringSliceFlag) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
 
 // parseExclusionFile reads exclusion patterns from a file.
 func parseExclusionFile(fs FS, filePath string) (map[string]bool, error) {
@@ -383,35 +396,43 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string,
 func printUsage() {
 	fmt.Printf("Usage: %s [options] <start_path> [file_extensions...]\n\n", os.Args[0])
 	fmt.Println("Options:")
-	fmt.Println("  -t, --exclude-tests    Exclude test files from known languages")
-	fmt.Println("  -h, --help             Display this help message")
+	flag.PrintDefaults()
 	fmt.Println("\nArguments:")
 	fmt.Println("  start_path             Path to the directory to scan")
 	fmt.Println("  file_extensions        Optional file extensions to include (e.g., .go .js)")
 }
 
 func main() {
-
+	// Define flags
 	var excludeTests bool
+	flag.BoolVar(&excludeTests, "t", false, "Exclude test files from known languages")
+	flag.BoolVar(&excludeTests, "exclude-tests", false, "Exclude test files from known languages")
+
 	var verbose bool
-	args := os.Args[1:]
+	flag.BoolVar(&verbose, "v", false, "Enable verbose output")
+	flag.BoolVar(&verbose, "verbose", false, "Enable verbose output")
+
+	var excludePatterns stringSliceFlag
+	flag.Var(&excludePatterns, "e", "Add pattern to exclude (e.g., vendor)")
+
+	var help bool
+	flag.BoolVar(&help, "h", false, "Display this help message")
+	flag.BoolVar(&help, "help", false, "Display this help message")
+
+	// Override default usage function
+	flag.Usage = printUsage
 
 	// Parse flags
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--exclude-tests" || args[i] == "-t" {
-			excludeTests = true
-			args = append(args[:i], args[i+1:]...)
-			i--
-		} else if args[i] == "--help" || args[i] == "-h" {
-			printUsage()
-			os.Exit(0)
-		} else if args[i] == "--verbose" || args[i] == "-v" {
-			verbose = true
-			args = append(args[:i], args[i+1:]...)
-			i--
-		}
+	flag.Parse()
+
+	// Check if help flag is set
+	if help {
+		printUsage()
+		os.Exit(0)
 	}
 
+	// Get remaining arguments after flags
+	args := flag.Args()
 	if len(args) < 1 {
 		printUsage()
 		os.Exit(1)
@@ -451,6 +472,16 @@ func main() {
 	} else {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "Including all files.\n")
+		}
+	}
+
+	// Add patterns from -e flags
+	if len(excludePatterns) > 0 {
+		for _, pattern := range excludePatterns {
+			exclusionPatterns[pattern] = true
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Added %d custom exclusion patterns\n", len(excludePatterns))
 		}
 	}
 

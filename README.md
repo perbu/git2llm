@@ -24,7 +24,9 @@ git2llm [options] <start_path> [file_extensions...]
 
 ### Options:
 
-- `-t, --exclude-tests`: Exclude test files (e.g., `*_test.go`, `test_*.go`)
+- `-t, --exclude-tests`: Exclude test files (e.g., `*_test.go`, `*Test.java`, see test-patterns.txt in the source for a complete list)
+- `-e`: Add pattern to exclude (e.g., `vendor` or `node_modules`). Can be used multiple times.
+- `-v, --verbose`: Enable verbose output
 - `-h, --help`: Display help information
 
 ### Examples:
@@ -45,6 +47,18 @@ Scan Python and JavaScript files, excluding tests:
 
 ```
 git2llm --exclude-tests ./project .py .js
+```
+
+Scan all files, excluding vendor directories:
+
+```
+git2llm -e vendor .
+```
+
+Scan Go files, excluding both vendor and node_modules directories:
+
+```
+git2llm -e vendor -e node_modules . .go
 ```
 
 ## How It Works

@@ -11,6 +11,41 @@ import (
 	"time"
 )
 
+func TestStringSliceFlag(t *testing.T) {
+	var flag stringSliceFlag
+
+	// Test initial state
+	if flag.String() != "" {
+		t.Errorf("Expected empty string, got: %s", flag.String())
+	}
+
+	// Test adding a single value
+	err := flag.Set("vendor")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if flag.String() != "vendor" {
+		t.Errorf("Expected 'vendor', got: %s", flag.String())
+	}
+
+	// Test adding multiple values
+	err = flag.Set("node_modules")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if flag.String() != "vendor, node_modules" {
+		t.Errorf("Expected 'vendor, node_modules', got: %s", flag.String())
+	}
+
+	// Verify the slice contains all values
+	if len(flag) != 2 {
+		t.Errorf("Expected 2 items, got: %d", len(flag))
+	}
+	if flag[0] != "vendor" || flag[1] != "node_modules" {
+		t.Errorf("Expected ['vendor', 'node_modules'], got: %v", flag)
+	}
+}
+
 func TestParseExclusionFile(t *testing.T) {
 	testCases := []struct {
 		name        string
@@ -144,6 +179,42 @@ func TestIsBinaryFile(t *testing.T) {
 			isBinary := isBinaryFile(mockFS, "testfile.txt")
 			if isBinary != tc.expect {
 				t.Errorf("For '%s', expected isBinary: %v, got: %v", tc.name, tc.expect, isBinary)
+			}
+		})
+	}
+}
+
+func TestExcludePatternFlag(t *testing.T) {
+	// Create a base exclusion patterns map
+	basePatterns := defaultPatterns()
+
+	// Create a slice of patterns to exclude
+	excludePatterns := stringSliceFlag{"vendor", "node_modules"}
+
+	// Add patterns from the flag to the exclusion patterns map
+	for _, pattern := range excludePatterns {
+		basePatterns[pattern] = true
+	}
+
+	// Test that the patterns were added correctly
+	testCases := []struct {
+		path     string
+		excluded bool
+	}{
+		{"vendor/package.json", true},
+		{"src/vendor/lib.js", true},
+		{"node_modules/react.js", true},
+		{"src/node_modules/package.json", true},
+		{"src/components/app.js", false},
+		{".git/config", true},           // Default pattern
+		{".vscode/settings.json", true}, // Default pattern
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.path, func(t *testing.T) {
+			result := isExcluded(tc.path, basePatterns)
+			if result != tc.excluded {
+				t.Errorf("For path '%s', expected excluded=%v, got %v", tc.path, tc.excluded, result)
 			}
 		})
 	}
