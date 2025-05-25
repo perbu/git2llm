@@ -200,7 +200,7 @@ func TestNewGit2LLM(t *testing.T) {
 				FileContent: "pattern1\npattern2\n",
 			}
 
-			git2llm, err := NewGit2LLM(tc.startPath, tc.fileTypes, mockFS, nil, tc.verbose, tc.excludeTests, tc.excludePatterns)
+			git2llm, err := NewGit2LLM(tc.startPath, tc.fileTypes, mockFS, nil, tc.verbose, tc.excludeTests, false, tc.excludePatterns)
 			if err != nil {
 				t.Fatalf("NewGit2LLM failed: %v", err)
 			}

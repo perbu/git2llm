@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
+	"github.com/perbu/git2llm/tokens"
 	"io"
 	"os"
 	"path/filepath"
@@ -68,17 +69,30 @@ type Git2LLM struct {
 	exclusionPatterns       map[string]bool
 	verbose                 bool
 	excludeTests            bool
+	countTokens             bool
+	counter                 *tokens.Counter
+	tokens                  int
 	testPatternsFileContent string
 	version                 string
+	model                   string
 }
 
 // NewGit2LLM creates a new Git2LLM instance with the provided configuration
-func NewGit2LLM(startPath string, fileTypes []string, fs FS, outputWriter io.Writer, verbose bool, excludeTests bool, excludePatterns []string) (*Git2LLM, error) {
+func NewGit2LLM(startPath string, fileTypes []string, fs FS, outputWriter io.Writer, verbose bool, excludeTests bool, countTokens bool, excludePatterns []string, model string) (*Git2LLM, error) {
 	if fs == nil {
 		fs = OSFS{}
 	}
 	if outputWriter == nil {
 		outputWriter = os.Stdout
+	}
+
+	var counter *tokens.Counter
+	if countTokens {
+		var err error
+		counter, err = tokens.New(model)
+		if err != nil {
+			return nil, fmt.Errorf("tokens.New(): %w", err)
+		}
 	}
 
 	g := &Git2LLM{
@@ -88,8 +102,11 @@ func NewGit2LLM(startPath string, fileTypes []string, fs FS, outputWriter io.Wri
 		fileTypes:               fileTypes,
 		verbose:                 verbose,
 		excludeTests:            excludeTests,
+		countTokens:             countTokens,
+		counter:                 counter,
 		testPatternsFileContent: testPatterns,
 		version:                 embeddedVersion,
+		model:                   model,
 	}
 
 	// Load exclusion patterns from .llmignore file
@@ -293,6 +310,13 @@ func (g *Git2LLM) generateDirectoryStructureString() (string, error) {
 	if err := generateTree(g.startPath, ""); err != nil {
 		return "", err
 	}
+	if g.countTokens {
+		newTokens, err := g.counter.Count(tree.String())
+		if err != nil {
+			return "", fmt.Errorf("g.counter.Count: %w")
+		}
+		g.tokens = g.tokens + newTokens
+	}
 
 	return tree.String(), nil
 }
@@ -387,6 +411,9 @@ func (g *Git2LLM) ScanRepository() error {
 	if err != nil {
 		return fmt.Errorf("error walking directory: %w", err)
 	}
+	if g.countTokens {
+		fmt.Fprintf(os.Stderr, "Total tokens: %d\n", g.tokens)
+	}
 
 	return nil
 }
@@ -438,10 +465,26 @@ func (g *Git2LLM) processFile(filePath string, relPath string) error {
 		}
 		return fmt.Errorf("error reading file %s: %w", relPath, err) // Still return an error for logging in scanFolder
 	}
+	var newTokens int
+	if g.countTokens {
+		var err error
+		newTokens, err = g.counter.Count(string(content))
+		if err != nil {
+			return fmt.Errorf("g.counter.Count: %w")
+		}
+		g.tokens = g.tokens + newTokens
+	}
+
 	if g.verbose {
 		// count the number of lines in the file
 		lineCount := strings.Count(string(content), "\n")
-		fmt.Fprintf(os.Stderr, "(%d lines)\n", lineCount) // Log to stderr
+		switch g.countTokens {
+		case true:
+			fmt.Fprintf(os.Stderr, "(%d tokens, %d lines)\n", newTokens, lineCount) // Log to stderr
+		default:
+			fmt.Fprintf(os.Stderr, "(%d lines)\n", lineCount) // Log to stderr
+		}
+
 	}
 	if _, err := fmt.Fprintf(g.outputWriter, "Content of %s:\n", relPath); err != nil {
 		return fmt.Errorf("error writing to output file: %w", err)
@@ -454,6 +497,13 @@ func (g *Git2LLM) processFile(filePath string, relPath string) error {
 	}
 	if _, err := fmt.Fprintln(g.outputWriter); err != nil {
 		return fmt.Errorf("error writing to output file: %w", err)
+	}
+	if g.countTokens {
+		newTokens, err := g.counter.Count(string(content))
+		if err != nil {
+			return fmt.Errorf("g.counter.Count: %w")
+		}
+		g.tokens = g.tokens + newTokens
 	}
 	return nil
 }
@@ -477,8 +527,14 @@ func main() {
 	flag.BoolVar(&verbose, "v", false, "Enable verbose output")
 	flag.BoolVar(&verbose, "verbose", false, "Enable verbose output")
 
+	var countTokens bool
+	flag.BoolVar(&countTokens, "c", false, "Count tokens in the output")
+
 	var excludePatterns stringSliceFlag
 	flag.Var(&excludePatterns, "e", "Add pattern to exclude (e.g., vendor)")
+
+	var model string
+	flag.StringVar(&model, "m", "cl100k_base", "Model to use (OpenAI or Gemini models)")
 
 	var help bool
 	flag.BoolVar(&help, "h", false, "Display this help message")
@@ -523,7 +579,7 @@ func main() {
 	}
 
 	// Create Git2LLM instance
-	git2llm, err := NewGit2LLM(startPath, fileTypes, nil, os.Stdout, verbose, excludeTests, excludePatterns)
+	git2llm, err := NewGit2LLM(startPath, fileTypes, nil, os.Stdout, verbose, excludeTests, countTokens, excludePatterns, model)
 	if err != nil {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "Error initializing git2llm: %v\n", err)
