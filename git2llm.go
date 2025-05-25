@@ -237,7 +237,7 @@ func isSymlink(filePath string) bool {
 	return isSymlinkFn(filePath)
 }
 
-// isBinaryFile checks if a file is likely a binary file by looking for null bytes in the first 512 bytes.
+// isBinaryFile checks if a file is likely a binary file by looking for null bytes in the first 16 kBytes.
 func isBinaryFile(fs FS, filePath string) bool {
 	file, err := fs.Open(filePath)
 	if err != nil {
@@ -245,8 +245,7 @@ func isBinaryFile(fs FS, filePath string) bool {
 	}
 	defer file.Close()
 
-	// Read up to X bytes to check for null byte
-	buffer := make([]byte, 4096)
+	buffer := make([]byte, 16384)
 	n, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
 		return false // Assume not binary if read error, or handle error differently
@@ -336,7 +335,6 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string,
 		if _, err := fmt.Fprintf(outputWriter, "Content of %s: (Skipped - Symlink)\n\n\n", relPath); err != nil {
 			return fmt.Errorf("error writing to output file: %w", err)
 		}
-
 		return nil // Skip symlinks content but not an error for overall process
 	}
 
@@ -351,7 +349,6 @@ func processFile(fs FS, outputWriter io.Writer, filePath string, relPath string,
 		if _, err := fmt.Fprintf(outputWriter, "Content of %s: (Skipped - Binary File)\n\n\n", relPath); err != nil {
 			return fmt.Errorf("error writing to output file: %w", err)
 		}
-
 		return nil // Skip binary files content but not an error for overall process
 	}
 
