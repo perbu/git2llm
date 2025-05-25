@@ -479,6 +479,10 @@ func (m *MockFS) Stat(name string) (os.FileInfo, error) {
 	return mockFileInfo{}, nil
 }
 
+func (m *MockFS) Lstat(name string) (os.FileInfo, error) {
+	return mockFileInfo{}, nil
+}
+
 type mockDirEntry struct {
 	name  string
 	isDir bool
@@ -512,3 +516,140 @@ func (m mockFileInfo) Mode() os.FileMode {
 func (m mockFileInfo) ModTime() time.Time { return time.Now() }
 func (m mockFileInfo) IsDir() bool        { return m.isDir }
 func (m mockFileInfo) Sys() interface{}   { return nil }
+
+func TestNewGit2LLM(t *testing.T) {
+	testCases := []struct {
+		name            string
+		startPath       string
+		fileTypes       []string
+		verbose         bool
+		excludeTests    bool
+		excludePatterns []string
+	}{
+		{
+			name:            "basic initialization",
+			startPath:       "/test/path",
+			fileTypes:       []string{".go", ".js"},
+			verbose:         true,
+			excludeTests:    false,
+			excludePatterns: []string{"vendor", "node_modules"},
+		},
+		{
+			name:            "exclude tests",
+			startPath:       "/test/path",
+			fileTypes:       nil,
+			verbose:         false,
+			excludeTests:    true,
+			excludePatterns: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockFS := &MockFS{
+				FileContent: "pattern1\npattern2\n",
+			}
+
+			git2llm, err := NewGit2LLM(tc.startPath, tc.fileTypes, mockFS, nil, tc.verbose, tc.excludeTests, tc.excludePatterns)
+			if err != nil {
+				t.Fatalf("NewGit2LLM failed: %v", err)
+			}
+
+			if git2llm.startPath != tc.startPath {
+				t.Errorf("Expected startPath %s, got %s", tc.startPath, git2llm.startPath)
+			}
+
+			if git2llm.verbose != tc.verbose {
+				t.Errorf("Expected verbose %v, got %v", tc.verbose, git2llm.verbose)
+			}
+
+			if git2llm.excludeTests != tc.excludeTests {
+				t.Errorf("Expected excludeTests %v, got %v", tc.excludeTests, git2llm.excludeTests)
+			}
+
+			// Check file types
+			if len(tc.fileTypes) != len(git2llm.fileTypes) {
+				t.Errorf("Expected %d file types, got %d", len(tc.fileTypes), len(git2llm.fileTypes))
+			}
+
+			// Check custom exclusion patterns were added
+			for _, pattern := range tc.excludePatterns {
+				if !git2llm.exclusionPatterns[pattern] {
+					t.Errorf("Expected exclusion pattern %s to be present", pattern)
+				}
+			}
+
+			// Check default patterns are present
+			if !git2llm.exclusionPatterns[".git"] {
+				t.Errorf("Expected default .git exclusion pattern to be present")
+			}
+		})
+	}
+}
+
+func TestGit2LLMIsExcluded(t *testing.T) {
+	git2llm := &Git2LLM{
+		exclusionPatterns: map[string]bool{
+			"temp/":       true,
+			"*.log":       true,
+			"/config/":    true,
+			"/exact_file": true,
+			"middle_part": true,
+			"*_test.go":   true,
+		},
+	}
+
+	testCases := []struct {
+		name   string
+		path   string
+		expect bool
+	}{
+		{"excluded directory prefix", "temp/file.txt", true},
+		{"excluded file type", "file.log", true},
+		{"not excluded other file type", "file.txt", false},
+		{"excluded absolute directory", "config/app.ini", true},
+		{"excluded exact file", "exact_file", true},
+		{"excluded test file", "foo_test.go", true},
+		{"not excluded implementation file", "foo.go", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			excluded := git2llm.isExcluded(tc.path)
+			if excluded != tc.expect {
+				t.Errorf("For path '%s', expected excluded: %v, got: %v", tc.path, tc.expect, excluded)
+			}
+		})
+	}
+}
+
+func TestGit2LLMIsBinaryFile(t *testing.T) {
+	testCases := []struct {
+		name        string
+		fileContent string
+		expect      bool
+	}{
+		{
+			name:        "text file",
+			fileContent: "This is a text file.",
+			expect:      false,
+		},
+		{
+			name:        "binary file with null byte",
+			fileContent: string([]byte{0, 1, 2, 3, 4, 5}),
+			expect:      true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockFS := &MockFS{FileContent: tc.fileContent}
+			git2llm := &Git2LLM{fs: mockFS}
+
+			isBinary := git2llm.isBinaryFile("testfile.txt")
+			if isBinary != tc.expect {
+				t.Errorf("For '%s', expected isBinary: %v, got: %v", tc.name, tc.expect, isBinary)
+			}
+		})
+	}
+}
