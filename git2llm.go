@@ -197,6 +197,7 @@ func defaultPatterns() map[string]bool {
 		".svn":    true,
 		".idea":   true,
 		".vscode": true,
+		"go.sum":  true,
 	}
 
 }
