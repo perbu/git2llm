@@ -200,7 +200,7 @@ func TestNewGit2LLM(t *testing.T) {
 				FileContent: "pattern1\npattern2\n",
 			}
 
-			git2llm, err := NewGit2LLM(tc.startPath, tc.fileTypes, mockFS, nil, tc.verbose, tc.excludeTests, false, tc.excludePatterns)
+			git2llm, err := NewGit2LLM(tc.startPath, tc.fileTypes, mockFS, nil, tc.verbose, tc.excludeTests, false, tc.excludePatterns, "")
 			if err != nil {
 				t.Fatalf("NewGit2LLM failed: %v", err)
 			}
@@ -277,17 +277,22 @@ func TestGit2LLMIsBinaryFile(t *testing.T) {
 	testCases := []struct {
 		name        string
 		fileContent string
-		expect      bool
+		forbidden   bool
 	}{
 		{
 			name:        "text file",
 			fileContent: "This is a text file.",
-			expect:      false,
+			forbidden:   false,
 		},
 		{
 			name:        "binary file with null byte",
 			fileContent: string([]byte{0, 1, 2, 3, 4, 5}),
-			expect:      true,
+			forbidden:   true,
+		},
+		{
+			name:        "secret key",
+			fileContent: "--- FORBIDDEN PRIVATE KEY ----\nblahblahblah\n",
+			forbidden:   true,
 		},
 	}
 
@@ -296,9 +301,9 @@ func TestGit2LLMIsBinaryFile(t *testing.T) {
 			mockFS := &MockFS{FileContent: tc.fileContent}
 			git2llm := &Git2LLM{fs: mockFS}
 
-			isBinary := git2llm.isBinaryFile("testfile.txt")
-			if isBinary != tc.expect {
-				t.Errorf("For '%s', expected isBinary: %v, got: %v", tc.name, tc.expect, isBinary)
+			reason := git2llm.isForbiddenFile("testfile.txt")
+			if reason != "" && !tc.forbidden {
+				t.Errorf("For '%s', expected forbidden: %v, got: %v", tc.name, tc.forbidden, reason != "")
 			}
 		})
 	}

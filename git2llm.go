@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	_ "embed"
 	"flag"
 	"fmt"
@@ -14,7 +15,8 @@ import (
 )
 
 const (
-	exclusionFile = ".llmignore"
+	exclusionFile   = ".llmignore"
+	secretKeyMarker = "PRIVATE KEY"
 )
 
 //go:embed test-patterns.txt
@@ -314,7 +316,7 @@ func (g *Git2LLM) generateDirectoryStructureString() (string, error) {
 	if g.countTokens {
 		newTokens, err := g.counter.Count(tree.String())
 		if err != nil {
-			return "", fmt.Errorf("g.counter.Count: %w")
+			return "", fmt.Errorf("g.counter.Count: %w", err)
 		}
 		g.tokens = g.tokens + newTokens
 	}
@@ -332,25 +334,29 @@ func (g *Git2LLM) isSymlink(filePath string) bool {
 }
 
 // isBinaryFile checks if a file is likely a binary file by looking for null bytes in the first 16 kBytes.
-func (g *Git2LLM) isBinaryFile(filePath string) bool {
+func (g *Git2LLM) isForbiddenFile(filePath string) string {
 	file, err := g.fs.Open(filePath)
 	if err != nil {
-		return false // Assume not binary if error opening, or handle error differently
+		return fmt.Sprintf("error(open): %v", err) //
 	}
 	defer file.Close()
 
 	buffer := make([]byte, 16384)
 	n, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
-		return false // Assume not binary if read error, or handle error differently
+		return fmt.Sprintf("error(read): %v", err) //
 	}
 
 	for i := 0; i < n; i++ {
 		if buffer[i] == 0 {
-			return true // Found null byte, likely binary
+			return "binary" // Found null byte, likely binary
 		}
 	}
-	return false // No null byte in the checked portion, likely text
+
+	if bytes.Contains(buffer, []byte(secretKeyMarker)) {
+		return "private key"
+	}
+	return "" // No null byte in the checked portion, likely text
 }
 
 // ScanRepository scans a folder, writes directory structure and file contents to output file.
@@ -433,9 +439,9 @@ func (g *Git2LLM) processFile(filePath string, relPath string) error {
 		}
 		return nil // Skip symlinks content but not an error for overall process
 	}
-
-	if g.isBinaryFile(filePath) {
-		fmt.Fprintf(os.Stderr, "Skipping binary file: %s\n", relPath) // Log to stderr
+	reason := g.isForbiddenFile(filePath)
+	if reason != "" {
+		fmt.Fprintf(os.Stderr, "Skipping forbidden (%q) file: %s\n", reason, relPath) // Log to stderr
 		if _, err := fmt.Fprintf(g.outputWriter, "File: %s (Binary - skipped content)\n", relPath); err != nil {
 			return fmt.Errorf("error writing to output file: %w", err)
 		}
@@ -471,7 +477,7 @@ func (g *Git2LLM) processFile(filePath string, relPath string) error {
 		var err error
 		newTokens, err = g.counter.Count(string(content))
 		if err != nil {
-			return fmt.Errorf("g.counter.Count: %w")
+			return fmt.Errorf("g.counter.Count: %w", err)
 		}
 		g.tokens = g.tokens + newTokens
 	}
@@ -502,7 +508,7 @@ func (g *Git2LLM) processFile(filePath string, relPath string) error {
 	if g.countTokens {
 		newTokens, err := g.counter.Count(string(content))
 		if err != nil {
-			return fmt.Errorf("g.counter.Count: %w")
+			return fmt.Errorf("g.counter.Count: %w", err)
 		}
 		g.tokens = g.tokens + newTokens
 	}
