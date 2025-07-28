@@ -9,7 +9,7 @@ git2llm scans a directory and creates a text representation that includes:
 
 - A visual directory tree structure
 - Contents of all files (or specific file types)
-- Built-in filtering to exclude binary files, test files, and common directories like `.git`
+- Built-in filtering to exclude binary files, secret keys, test files, and common directories like `.git`
 
 ## Usage
 
@@ -24,7 +24,8 @@ git2llm [options] <start_path> [file_extensions...]
 
 ### Options:
 
-- `-t, --exclude-tests`: Exclude test files (e.g., `*_test.go`, `*Test.java`, see test-patterns.txt in the source for a complete list)
+- `-t, --exclude-tests`: Exclude test files (e.g., `*_test.go`, `*Test.java`, see test-patterns.txt in the source for a
+  complete list)
 - `-e`: Add pattern to exclude (e.g., `vendor` or `node_modules`). Can be used multiple times.
 - `-v, --verbose`: Enable verbose output
 - `-h, --help`: Display help information
