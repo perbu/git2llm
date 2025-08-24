@@ -206,6 +206,14 @@ func defaultPatterns() map[string]bool {
 
 // isExcluded checks if a path is excluded based on exclusion patterns.
 func (g *Git2LLM) isExcluded(path string) bool {
+	// Check if any part of the path is a dotfile/dotfolder
+	parts := strings.Split(path, string(os.PathSeparator))
+	for _, part := range parts {
+		if part != "" && strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+
 	for pattern := range g.exclusionPatterns {
 		if strings.HasPrefix(pattern, "/") && strings.HasSuffix(pattern, "/") {
 			if strings.HasPrefix(path, pattern[1:]) || path == pattern[1:len(pattern)-1] {

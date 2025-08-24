@@ -9,7 +9,7 @@ git2llm scans a directory and creates a text representation that includes:
 
 - A visual directory tree structure
 - Contents of all files (or specific file types)
-- Built-in filtering to exclude binary files, secret keys, test files, and common directories like `.git`
+- Built-in filtering to exclude binary files, secret keys, test files, dotfiles, and common directories like `.git`
 
 ## Usage
 
@@ -74,7 +74,11 @@ git2llm -e vendor -e node_modules . .go
 
 ## Customizing Exclusions
 
-git2llm ignores certain directories by default (`.git`, `.svn`, `.idea`, `.vscode`).
+git2llm automatically excludes:
+- Dotfiles and dotfolders (any file or folder starting with `.`)
+- Common directories (`.git`, `.svn`, `.idea`, `.vscode`)
+- Binary files and files containing private keys
+
 You can create a `.llmignore` file in your project root with additional patterns to exclude.
 
 ## Installation

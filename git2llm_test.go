@@ -261,6 +261,11 @@ func TestGit2LLMIsExcluded(t *testing.T) {
 		{"excluded exact file", "exact_file", true},
 		{"excluded test file", "foo_test.go", true},
 		{"not excluded implementation file", "foo.go", false},
+		{"excluded dotfile", ".gitignore", true},
+		{"excluded dotfile with extension", ".env.local", true},
+		{"excluded dotfolder", ".config/app.ini", true},
+		{"excluded nested dotfile", "src/.DS_Store", true},
+		{"excluded dotfolder with regular file", ".vscode/settings.json", true},
 	}
 
 	for _, tc := range testCases {
