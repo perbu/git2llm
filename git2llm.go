@@ -77,10 +77,11 @@ type Git2LLM struct {
 	testPatternsFileContent string
 	version                 string
 	model                   string
+	noRecurse               bool
 }
 
 // NewGit2LLM creates a new Git2LLM instance with the provided configuration
-func NewGit2LLM(startPath string, fileTypes []string, fs FS, outputWriter io.Writer, verbose bool, excludeTests bool, countTokens bool, excludePatterns []string, model string) (*Git2LLM, error) {
+func NewGit2LLM(startPath string, fileTypes []string, fs FS, outputWriter io.Writer, verbose bool, excludeTests bool, countTokens bool, excludePatterns []string, model string, noRecurse bool) (*Git2LLM, error) {
 	if fs == nil {
 		fs = OSFS{}
 	}
@@ -109,6 +110,7 @@ func NewGit2LLM(startPath string, fileTypes []string, fs FS, outputWriter io.Wri
 		testPatternsFileContent: testPatterns,
 		version:                 embeddedVersion,
 		model:                   model,
+		noRecurse:               noRecurse,
 	}
 
 	// Load exclusion patterns from .llmignore file
@@ -303,8 +305,11 @@ func (g *Git2LLM) generateDirectoryStructureString() (string, error) {
 				if _, err := fmt.Fprintf(&tree, "%s%s%s/\n", prefix, connector, entryName); err != nil {
 					return fmt.Errorf("error writing to tree string: %w", err)
 				}
-				if err := generateTree(fullPath, newPrefix); err != nil {
-					return err
+				// Only recurse if not in non-recursive mode
+				if !g.noRecurse {
+					if err := generateTree(fullPath, newPrefix); err != nil {
+						return err
+					}
 				}
 			} else {
 				if _, err := fmt.Fprintf(&tree, "%s%s%s\n", prefix, connector, entryName); err != nil {
@@ -391,45 +396,92 @@ func (g *Git2LLM) ScanRepository() error {
 		return fmt.Errorf("error writing to output file: %w", err)
 	}
 
-	err = filepath.Walk(g.startPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error accessing path %s: %v\n", path, err) // Log to stderr
-			return nil                                                         // Don't stop walking because of one error
-		}
-		if !info.IsDir() {
-			relPath, err := filepath.Rel(g.startPath, path)
+	if g.noRecurse {
+		// Non-recursive mode: only scan files in the start directory
+		err = g.scanDirectory(g.startPath)
+	} else {
+		// Recursive mode: use filepath.Walk
+		err = filepath.Walk(g.startPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return fmt.Errorf("error getting relative path: %w", err)
+				fmt.Fprintf(os.Stderr, "Error accessing path %s: %v\n", path, err) // Log to stderr
+				return nil                                                         // Don't stop walking because of one error
 			}
-
-			if g.isExcluded(relPath) {
-				return nil
-			}
-
-			if len(g.fileTypes) == 0 { // if fileTypes is nil or empty, process all files
-				if err := g.processFile(path, relPath); err != nil {
-					fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", relPath, err) // Log to stderr
+			if !info.IsDir() {
+				relPath, err := filepath.Rel(g.startPath, path)
+				if err != nil {
+					return fmt.Errorf("error getting relative path: %w", err)
 				}
-			} else { // Otherwise check file extensions
-				for _, ext := range g.fileTypes {
-					if strings.HasSuffix(info.Name(), ext) {
-						if err := g.processFile(path, relPath); err != nil {
-							fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", relPath, err) // Log to stderr
+
+				if g.isExcluded(relPath) {
+					return nil
+				}
+
+				if len(g.fileTypes) == 0 { // if fileTypes is nil or empty, process all files
+					if err := g.processFile(path, relPath); err != nil {
+						fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", relPath, err) // Log to stderr
+					}
+				} else { // Otherwise check file extensions
+					for _, ext := range g.fileTypes {
+						if strings.HasSuffix(info.Name(), ext) {
+							if err := g.processFile(path, relPath); err != nil {
+								fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", relPath, err) // Log to stderr
+							}
+							return nil // processed the file, no need to check other extensions
 						}
-						return nil // processed the file, no need to check other extensions
 					}
 				}
 			}
-		}
-		return nil
-	})
+			return nil
+		})
+	}
 	if err != nil {
-		return fmt.Errorf("error walking directory: %w", err)
+		return fmt.Errorf("error scanning directory: %w", err)
 	}
 	if g.countTokens {
 		fmt.Fprintf(os.Stderr, "Total tokens: %d\n", g.tokens)
 	}
 
+	return nil
+}
+
+// scanDirectory scans a single directory non-recursively
+func (g *Git2LLM) scanDirectory(dirPath string) error {
+	entries, err := g.fs.ReadDir(dirPath)
+	if err != nil {
+		return fmt.Errorf("error reading directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue // Skip directories in non-recursive mode
+		}
+
+		entryName := entry.Name()
+		fullPath := filepath.Join(dirPath, entryName)
+		relPath, err := filepath.Rel(g.startPath, fullPath)
+		if err != nil {
+			return fmt.Errorf("error getting relative path: %w", err)
+		}
+
+		if g.isExcluded(relPath) {
+			continue
+		}
+
+		if len(g.fileTypes) == 0 { // if fileTypes is nil or empty, process all files
+			if err := g.processFile(fullPath, relPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", relPath, err) // Log to stderr
+			}
+		} else { // Otherwise check file extensions
+			for _, ext := range g.fileTypes {
+				if strings.HasSuffix(entryName, ext) {
+					if err := g.processFile(fullPath, relPath); err != nil {
+						fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", relPath, err) // Log to stderr
+					}
+					break // processed the file, no need to check other extensions
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -551,6 +603,9 @@ func main() {
 	var model string
 	flag.StringVar(&model, "m", "cl100k_base", "Model to use (OpenAI or Gemini models)")
 
+	var noRecurse bool
+	flag.BoolVar(&noRecurse, "R", false, "Do not recurse into subdirectories")
+
 	var help bool
 	flag.BoolVar(&help, "h", false, "Display this help message")
 	flag.BoolVar(&help, "help", false, "Display this help message")
@@ -594,7 +649,7 @@ func main() {
 	}
 
 	// Create Git2LLM instance
-	git2llm, err := NewGit2LLM(startPath, fileTypes, nil, os.Stdout, verbose, excludeTests, countTokens, excludePatterns, model)
+	git2llm, err := NewGit2LLM(startPath, fileTypes, nil, os.Stdout, verbose, excludeTests, countTokens, excludePatterns, model, noRecurse)
 	if err != nil {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "Error initializing git2llm: %v\n", err)
