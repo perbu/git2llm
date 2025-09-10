@@ -29,6 +29,9 @@ git2llm [options] <start_path> [file_extensions...]
 - `-e`: Add pattern to exclude (e.g., `vendor` or `node_modules`). Can be used multiple times.
 - `-v, --verbose`: Enable verbose output
 - `-h, --help`: Display help information
+- `-R`: Do not recurse into subdirectories
+- `-c`: Count tokens in the output
+- `-m`: Model to use for tokenization (OpenAI or Gemini models), default is "cl100k_base"
 
 ### Examples:
 
@@ -60,6 +63,24 @@ Scan Go files, excluding both vendor and node_modules directories:
 
 ```
 git2llm -e vendor -e node_modules . .go
+```
+
+Scan only the current directory (non-recursive):
+
+```
+git2llm -R .
+```
+
+Count tokens in the output:
+
+```
+git2llm -c .
+```
+
+Use a specific tokenization model:
+
+```
+git2llm -m gpt-4 .
 ```
 
 ## How It Works
