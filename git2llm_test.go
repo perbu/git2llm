@@ -200,7 +200,7 @@ func TestNewGit2LLM(t *testing.T) {
 				FileContent: "pattern1\npattern2\n",
 			}
 
-			git2llm, err := NewGit2LLM(tc.startPath, tc.fileTypes, mockFS, nil, tc.verbose, tc.excludeTests, false, tc.excludePatterns, "")
+			git2llm, err := NewGit2LLM(tc.startPath, tc.fileTypes, mockFS, nil, tc.verbose, tc.excludeTests, false, tc.excludePatterns, "", false)
 			if err != nil {
 				t.Fatalf("NewGit2LLM failed: %v", err)
 			}
@@ -278,26 +278,41 @@ func TestGit2LLMIsExcluded(t *testing.T) {
 	}
 }
 
-func TestGit2LLMIsBinaryFile(t *testing.T) {
+func TestGit2LLMIsForbiddenFile(t *testing.T) {
 	testCases := []struct {
-		name        string
-		fileContent string
-		forbidden   bool
+		name           string
+		fileContent    string
+		expectedReason string
 	}{
 		{
-			name:        "text file",
-			fileContent: "This is a text file.",
-			forbidden:   false,
+			name:           "text file",
+			fileContent:    "This is a text file.",
+			expectedReason: "",
 		},
 		{
-			name:        "binary file with null byte",
-			fileContent: string([]byte{0, 1, 2, 3, 4, 5}),
-			forbidden:   true,
+			name:           "binary file with null byte",
+			fileContent:    string([]byte{0, 1, 2, 3, 4, 5}),
+			expectedReason: "binary",
 		},
 		{
-			name:        "secret key",
-			fileContent: "--- FORBIDDEN PRIVATE KEY ----\nblahblahblah\n",
-			forbidden:   true,
+			name:           "private key file",
+			fileContent:    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC...\n-----END PRIVATE KEY-----",
+			expectedReason: "private key",
+		},
+		{
+			name:           "RSA private key",
+			fileContent:    "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+			expectedReason: "private key",
+		},
+		{
+			name:           "large text file",
+			fileContent:    strings.Repeat("Hello World\n", 1000),
+			expectedReason: "",
+		},
+		{
+			name:           "empty file",
+			fileContent:    "",
+			expectedReason: "",
 		},
 	}
 
@@ -307,9 +322,222 @@ func TestGit2LLMIsBinaryFile(t *testing.T) {
 			git2llm := &Git2LLM{fs: mockFS}
 
 			reason := git2llm.isForbiddenFile("testfile.txt")
-			if reason != "" && !tc.forbidden {
-				t.Errorf("For '%s', expected forbidden: %v, got: %v", tc.name, tc.forbidden, reason != "")
+			if reason != tc.expectedReason {
+				t.Errorf("For '%s', expected reason: '%s', got: '%s'", tc.name, tc.expectedReason, reason)
 			}
 		})
+	}
+}
+
+func TestGit2LLMLoadExclusionPatterns(t *testing.T) {
+	testCases := []struct {
+		name            string
+		fileContent     string
+		expectedPattern string
+		shouldExist     bool
+	}{
+		{
+			name:            "basic pattern loading",
+			fileContent:     "vendor/\nnode_modules/\n# comment\n\n",
+			expectedPattern: "vendor/",
+			shouldExist:     true,
+		},
+		{
+			name:            "ignore comments and empty lines",
+			fileContent:     "# This is a comment\nvalid_pattern\n\n# Another comment",
+			expectedPattern: "valid_pattern",
+			shouldExist:     true,
+		},
+		{
+			name:            "default patterns always present",
+			fileContent:     "",
+			expectedPattern: ".git",
+			shouldExist:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockFS := &MockFS{FileContent: tc.fileContent}
+			git2llm := &Git2LLM{fs: mockFS, exclusionPatterns: make(map[string]bool)}
+
+			err := git2llm.loadExclusionPatterns(".llmignore")
+			if err != nil {
+				t.Fatalf("loadExclusionPatterns failed: %v", err)
+			}
+
+			if git2llm.exclusionPatterns[tc.expectedPattern] != tc.shouldExist {
+				t.Errorf("Pattern '%s' existence: expected %v, got %v", tc.expectedPattern, tc.shouldExist, git2llm.exclusionPatterns[tc.expectedPattern])
+			}
+		})
+	}
+}
+
+func TestGit2LLMDirectoryStructureGeneration(t *testing.T) {
+	testCases := []struct {
+		name         string
+		dirStructure map[string][]string
+		startPath    string
+		expected     []string // strings that should be present in output
+		notExpected  []string // strings that should NOT be present in output
+	}{
+		{
+			name: "basic directory structure",
+			dirStructure: map[string][]string{
+				".":    {"file1.go", "dir1", "file2.txt"},
+				"dir1": {"nested.go"},
+			},
+			startPath:   ".",
+			expected:    []string{"file1.go", "file2.txt", "dir1/", "nested.go"},
+			notExpected: []string{},
+		},
+		{
+			name: "exclude dotfiles",
+			dirStructure: map[string][]string{
+				".": {"file1.go", ".gitignore", ".hidden", "normal.txt"},
+			},
+			startPath:   ".",
+			expected:    []string{"file1.go", "normal.txt"},
+			notExpected: []string{".gitignore", ".hidden"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockFS := &MockFS{DirStructure: tc.dirStructure}
+			git2llm := &Git2LLM{
+				fs:                mockFS,
+				startPath:         tc.startPath,
+				exclusionPatterns: defaultPatterns(),
+			}
+
+			result, err := git2llm.generateDirectoryStructureString()
+			if err != nil {
+				t.Fatalf("generateDirectoryStructureString failed: %v", err)
+			}
+
+			for _, expected := range tc.expected {
+				if !strings.Contains(result, expected) {
+					t.Errorf("Expected '%s' to be in output, but it wasn't. Output:\n%s", expected, result)
+				}
+			}
+
+			for _, notExpected := range tc.notExpected {
+				if strings.Contains(result, notExpected) {
+					t.Errorf("Did not expect '%s' to be in output, but it was. Output:\n%s", notExpected, result)
+				}
+			}
+		})
+	}
+}
+
+func TestGit2LLMNonRecursiveMode(t *testing.T) {
+	mockFS := &MockFS{
+		DirStructure: map[string][]string{
+			".":           {"file1.go", "subdir", "file2.txt"},
+			"subdir":      {"nested.go", "deep.txt"},
+			"subdir/sub2": {"verydeep.go"},
+		},
+		FileContentMap: map[string]string{
+			"file1.go":  "package main\nfunc main() {}",
+			"file2.txt": "hello world",
+		},
+	}
+
+	// Test recursive mode (default)
+	git2llm, err := NewGit2LLM(".", nil, mockFS, nil, false, false, false, nil, "", false)
+	if err != nil {
+		t.Fatalf("NewGit2LLM failed: %v", err)
+	}
+
+	var output strings.Builder
+	git2llm.outputWriter = &output
+	err = git2llm.ScanRepository()
+	if err != nil {
+		t.Fatalf("ScanRepository failed: %v", err)
+	}
+
+	recursiveOutput := output.String()
+
+	// Test non-recursive mode
+	git2llm2, err := NewGit2LLM(".", nil, mockFS, nil, false, false, false, nil, "", true) // noRecurse = true
+	if err != nil {
+		t.Fatalf("NewGit2LLM failed: %v", err)
+	}
+
+	var output2 strings.Builder
+	git2llm2.outputWriter = &output2
+	err = git2llm2.ScanRepository()
+	if err != nil {
+		t.Fatalf("ScanRepository failed: %v", err)
+	}
+
+	nonRecursiveOutput := output2.String()
+
+	// In non-recursive mode, should only see files in root directory
+	if !strings.Contains(nonRecursiveOutput, "file1.go") {
+		t.Error("Expected file1.go in non-recursive output")
+	}
+	if !strings.Contains(nonRecursiveOutput, "file2.txt") {
+		t.Error("Expected file2.txt in non-recursive output")
+	}
+
+	// Should see subdirectory files in recursive mode but not in non-recursive
+	if strings.Contains(nonRecursiveOutput, "nested.go") {
+		t.Error("Did not expect nested.go in non-recursive output")
+	}
+	if !strings.Contains(recursiveOutput, "nested.go") {
+		t.Error("Expected nested.go in recursive output")
+	}
+}
+
+func TestGit2LLMFileTypeFiltering(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+
+	// Create test files
+	testFiles := map[string]string{
+		"main.go":     "package main\n\nfunc main() {}\n",
+		"script.py":   "print('hello')\n",
+		"config.json": "{}\n",
+		"readme.txt":  "This is a readme\n",
+	}
+
+	for fileName, content := range testFiles {
+		filePath := filepath.Join(tempDir, fileName)
+		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			t.Fatalf("Failed to write test file %s: %v", fileName, err)
+		}
+	}
+
+	// Test filtering for only Go files
+	git2llm, err := NewGit2LLM(tempDir, []string{".go"}, nil, nil, false, false, false, nil, "", false)
+	if err != nil {
+		t.Fatalf("NewGit2LLM failed: %v", err)
+	}
+
+	var output strings.Builder
+	git2llm.outputWriter = &output
+	err = git2llm.ScanRepository()
+	if err != nil {
+		t.Fatalf("ScanRepository failed: %v", err)
+	}
+
+	result := output.String()
+
+	// Should include Go files
+	if !strings.Contains(result, "main.go") {
+		t.Error("Expected main.go to be included")
+	}
+	if !strings.Contains(result, "package main") {
+		t.Error("Expected main.go content to be included")
+	}
+
+	// Should not include other file types
+	if strings.Contains(result, "script.py") {
+		t.Error("Did not expect script.py to be included")
+	}
+	if strings.Contains(result, "config.json") {
+		t.Error("Did not expect config.json to be included")
 	}
 }

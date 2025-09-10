@@ -6,12 +6,13 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
-	"github.com/perbu/git2llm/tokens"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/perbu/git2llm/tokens"
 )
 
 const (
@@ -113,8 +114,9 @@ func NewGit2LLM(startPath string, fileTypes []string, fs FS, outputWriter io.Wri
 		noRecurse:               noRecurse,
 	}
 
-	// Load exclusion patterns from .llmignore file
-	err := g.loadExclusionPatterns(exclusionFile)
+	// Load exclusion patterns from .llmignore file in the start path
+	llmignorePath := filepath.Join(startPath, exclusionFile)
+	err := g.loadExclusionPatterns(llmignorePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load exclusion patterns: %w", err)
 	}
